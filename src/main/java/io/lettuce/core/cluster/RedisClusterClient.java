@@ -558,6 +558,7 @@ public class RedisClusterClient extends AbstractRedisClient {
      * @param <V> Value type.
      * @return a new connection.
      */
+    // SQ: 建连 0 / 4，向集群中 client 连接数最少的结点建连
     private <K, V> CompletableFuture<StatefulRedisClusterConnection<K, V>> connectClusterAsync(RedisCodec<K, V> codec) {
 
         if (partitions == null) {
@@ -565,10 +566,12 @@ public class RedisClusterClient extends AbstractRedisClient {
                     "Partitions not initialized. Initialize via RedisClusterClient.getPartitions()."));
         }
 
+        // SQ: 如果设置了定时刷新视图 ClusterTopologyRefreshOptions.periodicRefreshEnabled=true，则启动定时任务
         activateTopologyRefreshIfNeeded();
 
         logger.debug("connectCluster(" + initialUris + ")");
 
+        // SQ: 根据集群拓扑视图，从中选取 client 连接数最少的结点建连 (在 TopologyRefresh 用 info clients 命令 获取的结果)
         Mono<SocketAddress> socketAddressSupplier = getSocketAddressSupplier(TopologyComparators::sortByClientCount);
 
         DefaultEndpoint endpoint = new DefaultEndpoint(clientOptions, clientResources);
@@ -596,6 +599,7 @@ public class RedisClusterClient extends AbstractRedisClient {
         Mono<StatefulRedisClusterConnectionImpl<K, V>> connectionMono = Mono
                 .defer(() -> connect(socketAddressSupplier, codec, endpoint, connection, commandHandlerSupplier));
 
+        // SQ: 添加轮询重试，向 client 连接数最少的结点建连失败，则尝试下一个结点，总共的尝试次数等于结点数，每个结点都有机会
         for (int i = 1; i < getConnectionAttempts(); i++) {
             connectionMono = connectionMono
                     .onErrorResume(t -> connect(socketAddressSupplier, codec, endpoint, connection, commandHandlerSupplier));
@@ -611,6 +615,7 @@ public class RedisClusterClient extends AbstractRedisClient {
                 .map(it -> (StatefulRedisClusterConnection<K, V>) it).toFuture();
     }
 
+    // SQ: 建连 1 / 4
     private <T, K, V> Mono<T> connect(Mono<SocketAddress> socketAddressSupplier, RedisCodec<K, V> codec,
             DefaultEndpoint endpoint, RedisChannelHandler<K, V> connection, Supplier<CommandHandler> commandHandlerSupplier) {
 
@@ -690,6 +695,7 @@ public class RedisClusterClient extends AbstractRedisClient {
      * Initiates a channel connection considering {@link ClientOptions} initialization options, authentication and client name
      * options.
      */
+    // SQ: 建连 2 / 4
     private <K, V, T extends RedisChannelHandler<K, V>, S> ConnectionFuture<S> connectStatefulAsync(T connection,
             RedisCodec<K, V> codec, DefaultEndpoint endpoint, RedisURI connectionSettings,
             Mono<SocketAddress> socketAddressSupplier, Supplier<CommandHandler> commandHandlerSupplier) {
@@ -712,6 +718,7 @@ public class RedisClusterClient extends AbstractRedisClient {
 
             sync = sync.thenCompose(channelHandler -> {
 
+                // SQ: 如果设置了密码，则在建连完成后发送 AUTH 命令，取 AUTH 命令的结果作为返回值
                 CommandArgs<K, V> args = new CommandArgs<>(codec).add(connectionSettings.getPassword());
                 AsyncCommand<K, V, String> command = new AsyncCommand<>(
                         new Command<>(CommandType.AUTH, new StatusOutput<>(codec), args));

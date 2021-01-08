@@ -291,6 +291,7 @@ public abstract class AbstractRedisClient {
      * @since 4.4
      */
     @SuppressWarnings("unchecked")
+    // SQ: 建连 3 / 4
     protected <K, V, T extends RedisChannelHandler<K, V>> ConnectionFuture<T> initializeChannelAsync(
             ConnectionBuilder connectionBuilder) {
 
@@ -303,9 +304,14 @@ public abstract class AbstractRedisClient {
         CompletableFuture<SocketAddress> socketAddressFuture = new CompletableFuture<>();
         CompletableFuture<Channel> channelReadyFuture = new CompletableFuture<>();
 
-        socketAddressSupplier.doOnError(socketAddressFuture::completeExceptionally).doOnNext(socketAddressFuture::complete)
+        socketAddressSupplier.doOnError(socketAddressFuture::completeExceptionally)
+                .doOnNext(redisAddress ->
+                    // SQ: socketAddressSupplier 完成后把结果存放到 socketAddressFuture 中
+                    //  此处先执行
+                    socketAddressFuture.complete(redisAddress)
+                )
                 .subscribe(redisAddress -> {
-
+                    // SQ: 此处后执行
                     if (channelReadyFuture.isCancelled()) {
                         return;
                     }
@@ -316,6 +322,7 @@ public abstract class AbstractRedisClient {
                 channelReadyFuture.thenApply(channel -> (T) connectionBuilder.connection()));
     }
 
+    // SQ: 建连 4 / 4，执行真正的建连操作
     private void initializeChannelAsync0(ConnectionBuilder connectionBuilder, CompletableFuture<Channel> channelReadyFuture,
             SocketAddress redisAddress) {
 

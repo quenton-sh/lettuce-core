@@ -77,7 +77,7 @@ public class ClusterTopologyRefresh {
         Connections seedConnections = null;
         Connections discoveredConnections = null;
         try {
-            // SQ: 调用 RedisClusterClient.connectToNodeAsync 方法向所有 seed 结点建连
+            // SQ: 调用 RedisClusterClient.connectToNodeAsync 方法向所有 seed 结点建连，在 finally 中会把这些连接 close 掉
             seedConnections = getConnections(seed)
                 .get(commandTimeoutNs + connectTimeout.toNanos(), TimeUnit.NANOSECONDS);
 
@@ -131,6 +131,7 @@ public class ClusterTopologyRefresh {
             Thread.currentThread().interrupt();
             throw new RedisCommandInterruptedException(e);
         } finally {
+            // SQ: 把连接 close 掉
             if (seedConnections != null) {
                 try {
                     seedConnections.close();
