@@ -15,8 +15,6 @@
  */
 package io.lettuce.core;
 
-import static java.util.concurrent.CompletableFuture.completedFuture;
-
 import java.io.Closeable;
 import java.net.SocketAddress;
 import java.time.Duration;
@@ -24,10 +22,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.*;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import reactor.core.publisher.Mono;
 import io.lettuce.core.Transports.NativeTransports;
 import io.lettuce.core.internal.AsyncCloseable;
 import io.lettuce.core.internal.Futures;
@@ -37,7 +39,12 @@ import io.lettuce.core.resource.ClientResources;
 import io.lettuce.core.resource.DefaultClientResources;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.PooledByteBufAllocator;
-import io.netty.channel.*;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelOption;
+import io.netty.channel.ChannelPipeline;
+import io.netty.channel.ChannelPromise;
+import io.netty.channel.EventLoopGroup;
 import io.netty.channel.group.ChannelGroup;
 import io.netty.channel.group.DefaultChannelGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
@@ -46,6 +53,9 @@ import io.netty.util.concurrent.EventExecutorGroup;
 import io.netty.util.concurrent.Future;
 import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
+import reactor.core.publisher.Mono;
+
+import static java.util.concurrent.CompletableFuture.completedFuture;
 
 /**
  * Base Redis client. This class holds the netty infrastructure, {@link ClientOptions} and the basic connection procedure. This
@@ -318,6 +328,8 @@ public abstract class AbstractRedisClient {
 
         clientResources.nettyCustomizer().afterBootstrapInitialized(redisBootstrap);
         CompletableFuture<Boolean> channelInitialized = initializer.channelInitialized();
+
+        // SQ: 建连接
         ChannelFuture connectFuture = redisBootstrap.connect(redisAddress);
 
         ChannelPromise initFuture = connectFuture.channel().newPromise();

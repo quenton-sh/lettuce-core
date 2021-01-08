@@ -15,8 +15,6 @@
  */
 package io.lettuce.core;
 
-import static io.lettuce.core.protocol.CommandType.*;
-
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -32,8 +30,25 @@ import io.lettuce.core.codec.RedisCodec;
 import io.lettuce.core.codec.StringCodec;
 import io.lettuce.core.output.MultiOutput;
 import io.lettuce.core.output.StatusOutput;
-import io.lettuce.core.protocol.*;
+import io.lettuce.core.protocol.AsyncCommand;
+import io.lettuce.core.protocol.Command;
+import io.lettuce.core.protocol.CommandArgs;
+import io.lettuce.core.protocol.CommandArgsAccessor;
+import io.lettuce.core.protocol.CommandKeyword;
+import io.lettuce.core.protocol.CommandType;
+import io.lettuce.core.protocol.CompleteableCommand;
+import io.lettuce.core.protocol.ConnectionWatchdog;
+import io.lettuce.core.protocol.RedisCommand;
+import io.lettuce.core.protocol.TransactionalCommand;
 import io.netty.util.internal.logging.InternalLoggerFactory;
+
+import static io.lettuce.core.protocol.CommandType.AUTH;
+import static io.lettuce.core.protocol.CommandType.DISCARD;
+import static io.lettuce.core.protocol.CommandType.EXEC;
+import static io.lettuce.core.protocol.CommandType.MULTI;
+import static io.lettuce.core.protocol.CommandType.READONLY;
+import static io.lettuce.core.protocol.CommandType.READWRITE;
+import static io.lettuce.core.protocol.CommandType.SELECT;
 
 /**
  * A thread-safe connection to a Redis server. Multiple threads may share one {@link StatefulRedisConnectionImpl}
@@ -198,6 +213,9 @@ public class StatefulRedisConnectionImpl<K, V> extends RedisChannelHandler<K, V>
         return super.dispatch(sentCommands);
     }
 
+    // SQ: 对一些特殊命令注册回调，在命令完成后执行额外动作，比如:
+    //  * 对于 AUTH 命令，完成后从入参中取出 password 并缓存
+    //  * 对于 SELECT 命令，完成后从入参中取出 db 并缓存
     protected <T> RedisCommand<K, V, T> preProcessCommand(RedisCommand<K, V, T> command) {
 
         RedisCommand<K, V, T> local = command;

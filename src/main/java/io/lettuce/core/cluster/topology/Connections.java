@@ -36,6 +36,7 @@ import io.netty.util.internal.logging.InternalLoggerFactory;
  * @author Christian Weitendorf
  * @author Xujs
  */
+// SQ: 将连向多个结点的 StatefullRedisConnection 聚合在一起
 class Connections {
 
     private final static InternalLogger LOG = InternalLoggerFactory.getInstance(Connections.class);
@@ -90,6 +91,7 @@ class Connections {
      * Initiate {@code CLUSTER NODES} on all connections and return the {@link Requests}.
      * @return the {@link Requests}.
      */
+    // SQ: 构建多个 Command，用于通过每个 connection 向对应的 node 发送 cluster nodes 命令
     public Requests requestTopology() {
 
         Requests requests = new Requests();

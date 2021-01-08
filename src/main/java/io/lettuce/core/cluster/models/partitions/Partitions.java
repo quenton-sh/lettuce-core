@@ -56,7 +56,7 @@ public class Partitions implements Collection<RedisClusterNode> {
 
     private final List<RedisClusterNode> partitions = new ArrayList<>();
 
-    private volatile RedisClusterNode slotCache[] = EMPTY;
+    private volatile RedisClusterNode[] slotCache = EMPTY;
 
     private volatile Collection<RedisClusterNode> nodeReadView = Collections.emptyList();
 
