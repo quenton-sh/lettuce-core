@@ -777,6 +777,7 @@ public class RedisClusterClient extends AbstractRedisClient {
     /**
      * Reload partitions and re-initialize the distribution table.
      */
+    // SQ: 给 ClusterTopologyRefreshOptions.periodicRefreshEnabled=true 定时任务调用的方法
     public void reloadPartitions() {
 
         if (partitions == null) {
@@ -798,6 +799,7 @@ public class RedisClusterClient extends AbstractRedisClient {
             this.partitions.reload(loadedPartitions.getPartitions());
         }
 
+        // SQ: 更新所有已经创建的连接对 partitions 的引用
         updatePartitionsInConnections();
     }
 
@@ -835,9 +837,11 @@ public class RedisClusterClient extends AbstractRedisClient {
      */
     protected Partitions loadPartitions() {
 
+        // SQ: 挑选出一组 seed 结点用于获取 集群拓扑 信息
         Iterable<RedisURI> topologyRefreshSource = getTopologyRefreshSource();
 
         try {
+            // SQ: 获取集群拓扑
             return doLoadPartitions(topologyRefreshSource);
         } catch (RedisException e) {
 
@@ -845,6 +849,7 @@ public class RedisClusterClient extends AbstractRedisClient {
             if (useDynamicRefreshSources() && topologyRefreshSource != initialUris) {
 
                 try {
+                    // SQ: 如果动态获取 seed 方式失败则用用户初始传入的静态结点列表再试一次
                     return doLoadPartitions(initialUris);
                 } catch (RedisConnectionException e2) {
 
@@ -865,6 +870,7 @@ public class RedisClusterClient extends AbstractRedisClient {
 
     private Partitions doLoadPartitions(Iterable<RedisURI> topologyRefreshSource) {
 
+        // SQ: 向所有结点发 cluster nodes 和 info clients 命令，获取集群拓扑信息
         Map<RedisURI, Partitions> partitions = refresh.loadViews(topologyRefreshSource,
                 getClusterClientOptions().getSocketOptions().getConnectTimeout(), useDynamicRefreshSources());
 
@@ -872,9 +878,15 @@ public class RedisClusterClient extends AbstractRedisClient {
             throw new RedisException(getTopologyRefreshErrorMessage(topologyRefreshSource));
         }
 
+        // SQ: 从来自各结点的拓扑视图中选出一份，
+        //  原则：第一次选 connected 结点最多的；之后选与前一次 refresh 结果最接近的
         Partitions loadedPartitions = determinePartitions(this.partitions, partitions);
+
+        // SQ: 上一步选出来的拓扑视图来自哪个结点
         RedisURI viewedBy = refresh.getViewedBy(partitions, loadedPartitions);
 
+        // SQ: 对所有结点的连接参数都取该结点的配置
+        //  比如有 A、B、C 三个结点，最终拓扑视图选择 B 结点的，则对 A、C 结点的连接参数都设置为与对 B 结点的连接参数相同
         for (RedisClusterNode partition : loadedPartitions) {
             if (viewedBy != null) {
                 RedisURI uri = partition.getUri();
@@ -882,6 +894,7 @@ public class RedisClusterClient extends AbstractRedisClient {
             }
         }
 
+        // SQ: 如果设置了定时刷新视图 ClusterTopologyRefreshOptions.periodicRefreshEnabled=true，则启动定时任务
         activateTopologyRefreshIfNeeded();
 
         return loadedPartitions;
@@ -1073,10 +1086,16 @@ public class RedisClusterClient extends AbstractRedisClient {
      *
      * @return {@link Iterable} of {@link RedisURI} for the next topology refresh.
      */
+    // SQ: 挑选出一组结点用于获取获取 集群拓扑 信息，
+    //  最终会从各结点返回的拓扑视图中挑选出一个作为最终视图（挑选策略在 determinePartitions 方法中）
     protected Iterable<RedisURI> getTopologyRefreshSource() {
 
         boolean initialSeedNodes = !useDynamicRefreshSources();
 
+        // SQ: 初始刷新(partitions == null) 时，直接使用用户传入的 seed 列表；
+        //  后续再刷新时：
+        //    如果 useDynamicRefreshSources==false ，则仍使用用户传入的 seed 列表，
+        //    如果 useDynamicRefreshSources==true，则使用前一次加载到的拓扑视图中的全部结点（按 URI 排序）
         Iterable<RedisURI> seed;
         if (initialSeedNodes || partitions == null || partitions.isEmpty()) {
             seed = this.initialUris;

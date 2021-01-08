@@ -36,7 +36,7 @@ import io.netty.util.internal.logging.InternalLoggerFactory;
  * @author Christian Weitendorf
  * @author Xujs
  */
-// SQ: 将连向多个结点的 StatefullRedisConnection 聚合在一起
+// SQ: 将连到各个 seed 结点的 StatefullRedisConnection 聚合在一起
 class Connections {
 
     private final static InternalLogger LOG = InternalLoggerFactory.getInstance(Connections.class);
@@ -91,7 +91,7 @@ class Connections {
      * Initiate {@code CLUSTER NODES} on all connections and return the {@link Requests}.
      * @return the {@link Requests}.
      */
-    // SQ: 构建多个 Command，用于通过每个 connection 向对应的 node 发送 cluster nodes 命令
+    // SQ: 向每个 seed 结点发送 cluster nodes 命令，将所有结果的 future 聚合到一个 Request 对象中
     public Requests requestTopology() {
 
         Requests requests = new Requests();
@@ -104,6 +104,7 @@ class Connections {
                         new StatusOutput<>(StringCodec.UTF8), args);
                 TimedAsyncCommand<String, String, String> timedCommand = new TimedAsyncCommand<>(command);
 
+                // SQ: 发送命令
                 entry.getValue().dispatch(timedCommand);
                 requests.addRequest(entry.getKey(), timedCommand);
             }
@@ -116,6 +117,7 @@ class Connections {
      * Initiate {@code INFO CLIENTS} on all connections and return the {@link Requests}.
      * @return the {@link Requests}.
      */
+    // SQ: 向每个 seed 结点发送 info clients 命令，将所有结果的 future 聚合到一个 Request 对象中
     public Requests requestClients() {
 
         Requests requests = new Requests();
@@ -127,6 +129,7 @@ class Connections {
                         new CommandArgs<>(StringCodec.UTF8).add("CLIENTS"));
                 TimedAsyncCommand<String, String, String> timedCommand = new TimedAsyncCommand<>(command);
 
+                // SQ: 发送命令
                 entry.getValue().dispatch(timedCommand);
                 requests.addRequest(entry.getKey(), timedCommand);
             }

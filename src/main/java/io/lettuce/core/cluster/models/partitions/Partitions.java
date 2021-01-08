@@ -54,10 +54,12 @@ public class Partitions implements Collection<RedisClusterNode> {
 
     private static final RedisClusterNode[] EMPTY = new RedisClusterNode[SlotHash.SLOT_COUNT];
 
+    // SQ: 缓存的内部临时数据，变更后需要 updateCache() 将数据刷到 nodeReadView 字段才能对外部可见
     private final List<RedisClusterNode> partitions = new ArrayList<>();
 
     private volatile RedisClusterNode[] slotCache = EMPTY;
 
+    // SQ: 最终对外提供的数据
     private volatile Collection<RedisClusterNode> nodeReadView = Collections.emptyList();
 
     /**

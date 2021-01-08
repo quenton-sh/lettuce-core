@@ -68,6 +68,7 @@ public class ClusterPartitionParser {
      * @param nodes output of CLUSTER NODES.
      * @return the partitions object.
      */
+    // SQ: 解析 cluster nodes 命令返回的文本
     public static Partitions parse(String nodes) {
         Partitions result = new Partitions();
 

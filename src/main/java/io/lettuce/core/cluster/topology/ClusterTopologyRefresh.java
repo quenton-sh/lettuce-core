@@ -64,6 +64,8 @@ public class ClusterTopologyRefresh {
      * @param discovery {@code true} to discover additional nodes.
      * @return mapping between {@link RedisURI} and {@link Partitions}.
      */
+    // SQ: 从指定 seed 结点中获取集群拓扑信息，
+    //  如果 ClusterTopologyRefreshOptions.useDynamicRefreshSources=true 则会从所有结点中获取集群拓扑
     public Map<RedisURI, Partitions> loadViews(Iterable<RedisURI> seed, Duration connectTimeout, boolean discovery) {
 
         if (!isEventLoopActive()) {
@@ -75,28 +77,36 @@ public class ClusterTopologyRefresh {
         Connections seedConnections = null;
         Connections discoveredConnections = null;
         try {
-            seedConnections = getConnections(seed).get(commandTimeoutNs + connectTimeout.toNanos(), TimeUnit.NANOSECONDS);
+            // SQ: 调用 RedisClusterClient.connectToNodeAsync 方法向所有 seed 结点建连
+            seedConnections = getConnections(seed)
+                .get(commandTimeoutNs + connectTimeout.toNanos(), TimeUnit.NANOSECONDS);
 
             if (!isEventLoopActive()) {
                 return Collections.emptyMap();
             }
 
+            // SQ: 通过各 connection 发送命令
             Requests requestedTopology = seedConnections.requestTopology();
             Requests requestedClients = seedConnections.requestClients();
 
+            // SQ: 解析命令结果
             NodeTopologyViews nodeSpecificViews = getNodeSpecificViews(requestedTopology, requestedClients, commandTimeoutNs);
 
             if (discovery && isEventLoopActive()) {
 
+                // SQ: 所有通过各 seed 可以看到的 node 集合
                 Set<RedisURI> allKnownUris = nodeSpecificViews.getClusterNodes();
+                // SQ: 减去 seed 后，需要额外查看的 node 集合
                 Set<RedisURI> discoveredNodes = difference(allKnownUris, toSet(seed));
 
                 if (!discoveredNodes.isEmpty()) {
+                    // SQ: 向额外 node 建连
                     discoveredConnections = getConnections(discoveredNodes).optionalGet(commandTimeoutNs,
                             TimeUnit.NANOSECONDS);
                     Connections connections = seedConnections.mergeWith(discoveredConnections);
 
                     if (isEventLoopActive()) {
+                        // SQ: 向所有 node (包含 seed 和 额外 node) 做查询
                         requestedTopology = requestedTopology.mergeWith(connections.requestTopology());
                         requestedClients = requestedClients.mergeWith(connections.requestClients());
 
@@ -170,20 +180,26 @@ public class ClusterTopologyRefresh {
     NodeTopologyViews getNodeSpecificViews(Requests requestedTopology, Requests requestedClients, long commandTimeoutNs)
             throws InterruptedException {
 
+        // SQ: 所有 seed 结点看到的所有结点综合，
+        //  比如集群有 5 个节点，选出 3 个 seed 节点，每个 seed 结点都会看到 5 个 结点信息，所以 allNodes 数组中总共有 3 * 5 = 15 个元素
         List<RedisClusterNodeSnapshot> allNodes = new ArrayList<>();
 
         Map<String, Long> latencies = new HashMap<>();
         Map<String, Integer> clientCountByNodeId = new HashMap<>();
 
+        // SQ: 等待发往各 seed 结点的 cluster nodes 命令全部执行完毕
         long waitTime = requestedTopology.await(commandTimeoutNs, TimeUnit.NANOSECONDS);
+        // SQ: 等待发往各 seed 结点的 info clients 命令全部执行完毕
         requestedClients.await(commandTimeoutNs - waitTime, TimeUnit.NANOSECONDS);
 
         Set<RedisURI> nodes = requestedTopology.nodes();
 
+        // SQ: 遍历各 seed 结点，解析前面两个命令的结果
         List<NodeTopologyView> views = new ArrayList<>();
         for (RedisURI nodeUri : nodes) {
 
             try {
+                // SQ: 解析命令结果
                 NodeTopologyView nodeTopologyView = NodeTopologyView.from(nodeUri, requestedTopology, requestedClients);
 
                 if (!nodeTopologyView.isAvailable()) {
@@ -199,6 +215,7 @@ public class ClusterTopologyRefresh {
 
                 List<RedisClusterNodeSnapshot> nodeWithStats = new ArrayList<>(nodeTopologyView.getPartitions().size());
 
+                // SQ: 将每个 RedisClusterNode 包装为 RedisClusterNodeSnapshot
                 for (RedisClusterNode partition : nodeTopologyView.getPartitions()) {
 
                     if (validNode(partition)) {
@@ -208,6 +225,8 @@ public class ClusterTopologyRefresh {
                         if (partition.is(RedisClusterNode.NodeFlag.MYSELF)) {
 
                             // record latency for later partition ordering
+                            // SQ: 收集 lettuce 结点到该 seed 结点的延时 和该 seed 结点上的 client 连接数
+                            //  其实 NodeTopologyView 中就有延时信息，放到这里才收集是因为需要 partition 中的 nodeId
                             latencies.put(partition.getNodeId(), nodeTopologyView.getLatency());
                             clientCountByNodeId.put(partition.getNodeId(), nodeTopologyView.getConnectedClients());
                         }
@@ -219,6 +238,7 @@ public class ClusterTopologyRefresh {
                 Partitions partitions = new Partitions();
                 partitions.addAll(nodeWithStats);
 
+                // SQ: 将该 seed 结点的 Partitions 中的各 RedisClusterNode 替换为 RedisClusterNodeSnapshot
                 nodeTopologyView.setPartitions(partitions);
 
                 views.add(nodeTopologyView);
@@ -227,11 +247,14 @@ public class ClusterTopologyRefresh {
             }
         }
 
+        // SQ: allNodes 中只有各个 self 结点有 latency 信息，此处用这些信息给所有 nodeId 相同的 node 赋值，
+        //  保证各 RedisClusterNodeSnapshot 对象中都有 latency
         for (RedisClusterNodeSnapshot node : allNodes) {
             node.setConnectedClients(clientCountByNodeId.get(node.getNodeId()));
             node.setLatencyNs(latencies.get(node.getNodeId()));
         }
 
+        // SQ: 给各个 NodeTopologyView 中的 nodes 重新排序，默认按 latency (RedisClusterNodeSnapshot.latencyNs 字段) 排序
         SortAction sortAction = SortAction.getSortAction();
         for (NodeTopologyView view : views) {
 
@@ -271,6 +294,7 @@ public class ClusterTopologyRefresh {
             try {
                 SocketAddress socketAddress = clientResources.socketAddressResolver().resolve(redisURI);
 
+                // SQ: 通过 NodeConnectionFactory 建连接，最终会调用 RedisCluterClient 的 connectToNodeAsync 方法
                 ConnectionFuture<StatefulRedisConnection<String, String>> connectionFuture = nodeConnectionFactory
                         .connectToNodeAsync(StringCodec.UTF8, socketAddress);
 
@@ -299,6 +323,8 @@ public class ClusterTopologyRefresh {
 
                         sync.completeExceptionally(new RedisConnectionException(message, throwableToUse));
                     } else {
+                        // SQ: 同步：对外返回 sync 对象
+                        // SQ: 异步：建连成功后把结果 (StatefulRedisConnection 对象) 放到 sync 对象中
                         connection.async().clientSetname("lettuce#ClusterTopologyRefresh");
                         sync.complete(connection);
                     }

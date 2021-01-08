@@ -29,10 +29,12 @@ import io.lettuce.core.cluster.models.partitions.RedisClusterNode;
  * @author Mark Paluch
  * @author Xujs
  */
+// SQ: 某一个 seed 结点所看到的集群拓扑状态，即对这个结点执行 cluster nodes 和 info clients 两个命令的结果
 class NodeTopologyView {
 
     private static final Pattern NUMBER = Pattern.compile("(\\d+)");
 
+    // SQ: 两个命令都执行成功了，就认为该 seed 结点是 available
     private final boolean available;
 
     private final RedisURI redisURI;
@@ -41,6 +43,7 @@ class NodeTopologyView {
 
     private final int connectedClients;
 
+    // SQ: 这个变量的值是执行 cluster nodes 命令所花费的时间，作为从 lettuce 结点到该 seed 结点的延时
     private final long latency;
 
     private final String clusterNodes;
@@ -63,8 +66,12 @@ class NodeTopologyView {
         this.available = true;
         this.redisURI = redisURI;
 
+        // SQ: 解析 cluster nodes 命令的结果
         this.partitions = ClusterPartitionParser.parse(clusterNodes);
+
+        // SQ: 解析 info clients 命令的结果
         this.connectedClients = clientList != null ? getClients(clientList) : 0;
+
         this.clusterNodes = clusterNodes;
         this.clientList = clientList;
         this.latency = latency;
