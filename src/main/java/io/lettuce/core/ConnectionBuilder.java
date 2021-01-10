@@ -36,6 +36,7 @@ import io.netty.util.Timer;
  *
  * @author Mark Paluch
  */
+// SQ: 负责把建连相关的所有对象汇总到一起，最后 build 出一个 RedisChannelInitializer 注册到 Netty 中
 public class ConnectionBuilder {
 
     private static final RedisCommandBuilder<String, String> INITIALIZING_CMD_BUILDER = new RedisCommandBuilder<>(

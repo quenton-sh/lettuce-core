@@ -291,7 +291,7 @@ public abstract class AbstractRedisClient {
      * @since 4.4
      */
     @SuppressWarnings("unchecked")
-    // SQ: 建连 3 / 4
+    // SQ: Cluster 建连 3 / 4
     protected <K, V, T extends RedisChannelHandler<K, V>> ConnectionFuture<T> initializeChannelAsync(
             ConnectionBuilder connectionBuilder) {
 
@@ -315,6 +315,7 @@ public abstract class AbstractRedisClient {
                     if (channelReadyFuture.isCancelled()) {
                         return;
                     }
+                    // SQ: netty 建连
                     initializeChannelAsync0(connectionBuilder, channelReadyFuture, redisAddress);
                 }, channelReadyFuture::completeExceptionally);
 
@@ -322,7 +323,7 @@ public abstract class AbstractRedisClient {
                 channelReadyFuture.thenApply(channel -> (T) connectionBuilder.connection()));
     }
 
-    // SQ: 建连 4 / 4，执行真正的建连操作
+    // SQ: Cluster 建连 4 / 4，执行真正的 netty 建连操作
     private void initializeChannelAsync0(ConnectionBuilder connectionBuilder, CompletableFuture<Channel> channelReadyFuture,
             SocketAddress redisAddress) {
 

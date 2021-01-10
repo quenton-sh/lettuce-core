@@ -33,6 +33,7 @@ import io.netty.util.internal.logging.InternalLoggerFactory;
  *
  * @author Mark Paluch
  */
+// SQ: 把 RedisCommond 对象序列化为 ByteBuffer
 public class CommandEncoder extends MessageToByteEncoder<Object> {
 
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(CommandEncoder.class);

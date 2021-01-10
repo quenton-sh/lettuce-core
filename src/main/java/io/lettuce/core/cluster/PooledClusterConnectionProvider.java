@@ -50,6 +50,8 @@ import io.netty.util.internal.logging.InternalLoggerFactory;
  * @author Mark Paluch
  * @since 3.0
  */
+// SQ: 负责管理（缓存）各 slot 所对应的 StatefulRedisConnection，取连接时可以按读、写 + slot 来获取
+//    通过内部的 DefaultClusterNodeConnectionFactory 创建新连接，最终会调用 RedisCluenterClient.connectToNodeAsync()
 @SuppressWarnings({ "unchecked", "rawtypes" })
 class PooledClusterConnectionProvider<K, V> implements ClusterConnectionProvider, AsyncClusterConnectionProvider {
 

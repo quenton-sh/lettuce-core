@@ -482,6 +482,7 @@ public class RedisClusterClient extends AbstractRedisClient {
      * @param <V> Value type.
      * @return A new connection.
      */
+    // SQ: 创建到具体结点的连接
     <K, V> ConnectionFuture<StatefulRedisConnection<K, V>> connectToNodeAsync(RedisCodec<K, V> codec, String nodeId,
             RedisChannelWriter clusterWriter, Mono<SocketAddress> socketAddressSupplier) {
 
@@ -499,6 +500,8 @@ public class RedisClusterClient extends AbstractRedisClient {
 
         StatefulRedisConnectionImpl<K, V> connection = new StatefulRedisConnectionImpl<>(writer, codec, timeout);
 
+        // SQ: 此处 lettuce 和 netty 建立了联系，CommandHandler 会把 netty 的 channel 传递给 endpoint，
+        //  CommandHandler 会被 ConnectionBuilder 放入 PlainChannelInitializer 中，在 Bootstrap connect 成功后被回调
         ConnectionFuture<StatefulRedisConnection<K, V>> connectionFuture = connectStatefulAsync(connection, codec, endpoint,
                 getFirstUri(), socketAddressSupplier, () -> new CommandHandler(clientOptions, clientResources, endpoint));
 
@@ -574,20 +577,28 @@ public class RedisClusterClient extends AbstractRedisClient {
         // SQ: 根据集群拓扑视图，从中选取 client 连接数最少的结点建连 (在 TopologyRefresh 用 info clients 命令 获取的结果)
         Mono<SocketAddress> socketAddressSupplier = getSocketAddressSupplier(TopologyComparators::sortByClientCount);
 
+        // SQ: DefaultEndpoint 是 RedisChannelWriter 的具体实现类，负责发送命令
         DefaultEndpoint endpoint = new DefaultEndpoint(clientOptions, clientResources);
         RedisChannelWriter writer = endpoint;
 
+        // SQ: 当设置了 ClientOptions.TimeoutOptions.timeoutCommands == true 时，
+        //  在 DefaultEndpoint 外包一层 CommandExpiryWriter
         if (CommandExpiryWriter.isSupported(clientOptions)) {
             writer = new CommandExpiryWriter(writer, clientOptions, clientResources);
         }
 
+        // SQ: ClusterDistributionChannelWriter 负责把 RedisCommand 分发给某一具体 StatefulRedisConnection 上的 RedisChannelWriter
+        //  内部通过 PooledClusterConnectionProvider 找 StatefulRedisConnection
         ClusterDistributionChannelWriter clusterWriter = new ClusterDistributionChannelWriter(clientOptions, writer,
                 clusterTopologyRefreshScheduler);
+
+        // SQ: PooledClusterConnectionProvider 负责管理（缓存）各 slot 所对应的 StatefulRedisConnection
+        //  内部通过 connectToNodeAsyn() 创建连接
         PooledClusterConnectionProvider<K, V> pooledClusterConnectionProvider = new PooledClusterConnectionProvider<>(this,
                 clusterWriter, codec, clusterTopologyRefreshScheduler);
-
         clusterWriter.setClusterConnectionProvider(pooledClusterConnectionProvider);
 
+        // SQ: StatefulRedisClusterConnectionImpl 主要是包住 RedisChannelWriter
         StatefulRedisClusterConnectionImpl<K, V> connection = new StatefulRedisClusterConnectionImpl<>(clusterWriter, codec,
                 timeout);
 
@@ -599,7 +610,7 @@ public class RedisClusterClient extends AbstractRedisClient {
         Mono<StatefulRedisClusterConnectionImpl<K, V>> connectionMono = Mono
                 .defer(() -> connect(socketAddressSupplier, codec, endpoint, connection, commandHandlerSupplier));
 
-        // SQ: 添加轮询重试，向 client 连接数最少的结点建连失败，则尝试下一个结点，总共的尝试次数等于结点数，每个结点都有机会
+        // SQ: 添加轮询重试，向 client 连接数最少的结点建连失败，则尝试连接数第二少的结点，总共的尝试次数等于结点数，每个结点都有机会
         for (int i = 1; i < getConnectionAttempts(); i++) {
             connectionMono = connectionMono
                     .onErrorResume(t -> connect(socketAddressSupplier, codec, endpoint, connection, commandHandlerSupplier));
@@ -711,6 +722,7 @@ public class RedisClusterClient extends AbstractRedisClient {
             }
         }
 
+        // SQ: 建连
         ConnectionFuture<RedisChannelHandler<K, V>> future = initializeChannelAsync(connectionBuilder);
         ConnectionFuture<?> sync = future;
 
@@ -758,13 +770,13 @@ public class RedisClusterClient extends AbstractRedisClient {
     }
 
     private <K, V> ConnectionBuilder createConnectionBuilder(RedisChannelHandler<K, V> connection, DefaultEndpoint endpoint,
-            RedisURI connectionSettings, Mono<SocketAddress> socketAddressSupplier,
-            Supplier<CommandHandler> commandHandlerSupplier) {
+                                                             RedisURI redisURI, Mono<SocketAddress> socketAddressSupplier,
+                                                             Supplier<CommandHandler> commandHandlerSupplier) {
 
         ConnectionBuilder connectionBuilder;
-        if (connectionSettings.isSsl()) {
+        if (redisURI.isSsl()) {
             SslConnectionBuilder sslConnectionBuilder = SslConnectionBuilder.sslConnectionBuilder();
-            sslConnectionBuilder.ssl(connectionSettings);
+            sslConnectionBuilder.ssl(redisURI);
             connectionBuilder = sslConnectionBuilder;
         } else {
             connectionBuilder = ConnectionBuilder.connectionBuilder();
@@ -776,8 +788,11 @@ public class RedisClusterClient extends AbstractRedisClient {
         connectionBuilder.clientResources(clientResources);
         connectionBuilder.endpoint(endpoint);
         connectionBuilder.commandHandler(commandHandlerSupplier);
-        connectionBuilder(socketAddressSupplier, connectionBuilder, connectionSettings);
-        channelType(connectionBuilder, connectionSettings);
+
+        // SQ: 设置 netty 的 BootStrap 相关配置
+        connectionBuilder(socketAddressSupplier, connectionBuilder, redisURI);
+        channelType(connectionBuilder, redisURI);
+
         return connectionBuilder;
     }
 

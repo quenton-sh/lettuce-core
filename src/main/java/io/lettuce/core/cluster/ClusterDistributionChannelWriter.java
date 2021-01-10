@@ -15,14 +15,21 @@
  */
 package io.lettuce.core.cluster;
 
-import static io.lettuce.core.cluster.SlotHash.getSlot;
-
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.IntStream;
 
-import io.lettuce.core.*;
+import io.lettuce.core.ClientOptions;
+import io.lettuce.core.ReadFrom;
+import io.lettuce.core.RedisChannelHandler;
+import io.lettuce.core.RedisChannelWriter;
+import io.lettuce.core.RedisException;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.cluster.ClusterConnectionProvider.Intent;
 import io.lettuce.core.cluster.models.partitions.Partitions;
@@ -31,8 +38,16 @@ import io.lettuce.core.internal.Futures;
 import io.lettuce.core.internal.HostAndPort;
 import io.lettuce.core.internal.LettuceAssert;
 import io.lettuce.core.output.StatusOutput;
-import io.lettuce.core.protocol.*;
+import io.lettuce.core.protocol.Command;
+import io.lettuce.core.protocol.CommandArgs;
+import io.lettuce.core.protocol.CommandKeyword;
+import io.lettuce.core.protocol.CommandType;
+import io.lettuce.core.protocol.ConnectionFacade;
+import io.lettuce.core.protocol.ProtocolKeyword;
+import io.lettuce.core.protocol.RedisCommand;
 import io.lettuce.core.resource.ClientResources;
+
+import static io.lettuce.core.cluster.SlotHash.getSlot;
 
 /**
  * Channel writer for cluster operation. This writer looks up the right partition by hash/slot for the operation.
@@ -40,6 +55,10 @@ import io.lettuce.core.resource.ClientResources;
  * @author Mark Paluch
  * @since 3.0
  */
+// SQ: 负责把 RedisCommand 分发给某一具体 StatefulRedisConnection 上的 RedisChannelWriter
+//  1. 根据 key 计算 slot
+//  2. 通过 PooledClusterConnectionProvider 获取到 slot 的 StatefulRedisConnection
+//  3. 从 StatefullRedisConnection 中拿到 RedisChannelWriter，通过 RedisChannelWriter.write() 发送命令
 class ClusterDistributionChannelWriter implements RedisChannelWriter {
 
     private final RedisChannelWriter defaultWriter;
@@ -124,12 +143,15 @@ class ClusterDistributionChannelWriter implements RedisChannelWriter {
             ByteBuffer encodedKey = args.getFirstEncodedKey();
             if (encodedKey != null) {
 
+                // SQ: 计算 slot
                 int hash = getSlot(encodedKey);
                 Intent intent = getIntent(command.getType());
 
+                // SQ: 通过 PooledClusterConnectionProvider 获取 StatefullRedisConnection
                 CompletableFuture<StatefulRedisConnection<K, V>> connectFuture = ((AsyncClusterConnectionProvider) clusterConnectionProvider)
                         .getConnectionAsync(intent, hash);
 
+                // SQ: 从 StatefullRedisConnection 中拿到 RedisChannelWriter，通过 RedisChannelWriter.write() 发送命令
                 if (isSuccessfullyCompleted(connectFuture)) {
                     writeCommand(commandToSend, false, connectFuture.join(), null);
                 } else {

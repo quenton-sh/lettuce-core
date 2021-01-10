@@ -244,6 +244,7 @@ public class ConnectionWatchdog extends ChannelInboundHandlerAdapter {
                 }
 
                 reconnectWorkers.submit(() -> {
+                    // SQ: 提交重连异步任务
                     ConnectionWatchdog.this.run(attempt);
                     return null;
                 });
@@ -265,6 +266,7 @@ public class ConnectionWatchdog extends ChannelInboundHandlerAdapter {
      * @param attempt attempt counter.
      * @throws Exception when reconnection fails.
      */
+    // SQ: 执行重连的逻辑
     public void run(int attempt) throws Exception {
 
         reconnectSchedulerSync.set(false);

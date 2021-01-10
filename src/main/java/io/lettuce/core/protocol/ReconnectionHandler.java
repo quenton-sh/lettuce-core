@@ -118,6 +118,7 @@ class ReconnectionHandler {
         return Tuples.of(future, address);
     }
 
+    // SQ: 执行具体的 Netty 重连动作
     private void reconnect0(CompletableFuture<Channel> result, SocketAddress remoteAddress) {
 
         ChannelFuture connectFuture = bootstrap.connect(remoteAddress);

@@ -15,14 +15,16 @@
  */
 package io.lettuce.core.protocol;
 
-import static io.lettuce.core.ConnectionEvents.Activated;
-import static io.lettuce.core.ConnectionEvents.PingBeforeActivate;
-import static io.lettuce.core.ConnectionEvents.Reset;
-
 import java.io.IOException;
 import java.net.SocketAddress;
 import java.nio.charset.Charset;
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Queue;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
 import io.lettuce.core.ClientOptions;
@@ -36,7 +38,11 @@ import io.lettuce.core.tracing.TraceContext;
 import io.lettuce.core.tracing.Tracer;
 import io.lettuce.core.tracing.Tracing;
 import io.netty.buffer.ByteBuf;
-import io.netty.channel.*;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelDuplexHandler;
+import io.netty.channel.ChannelHandler;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelPromise;
 import io.netty.channel.local.LocalAddress;
 import io.netty.util.Recycler;
 import io.netty.util.concurrent.Future;
@@ -44,6 +50,10 @@ import io.netty.util.concurrent.GenericFutureListener;
 import io.netty.util.internal.logging.InternalLogLevel;
 import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
+
+import static io.lettuce.core.ConnectionEvents.Activated;
+import static io.lettuce.core.ConnectionEvents.PingBeforeActivate;
+import static io.lettuce.core.ConnectionEvents.Reset;
 
 /**
  * A netty {@link ChannelHandler} responsible for writing redis commands and reading responses from the server.
@@ -55,6 +65,7 @@ import io.netty.util.internal.logging.InternalLoggerFactory;
  * @author Daniel Albuquerque
  * @author Gavin Cook
  */
+// SQ: 通过 Netty 处理读写的核心组件
 public class CommandHandler extends ChannelDuplexHandler implements HasQueuedCommands {
 
     /**
@@ -296,6 +307,7 @@ public class CommandHandler extends ChannelDuplexHandler implements HasQueuedCom
 
         setState(LifecycleState.CONNECTED);
 
+        // SQ: 把 channel 绑定到 endpoint 上
         endpoint.notifyChannelActive(ctx.channel());
 
         super.channelActive(ctx);
@@ -555,6 +567,7 @@ public class CommandHandler extends ChannelDuplexHandler implements HasQueuedCom
      *
      * @see io.netty.channel.ChannelInboundHandlerAdapter#channelRead(io.netty.channel.ChannelHandlerContext, java.lang.Object)
      */
+    // SQ: 读取 Redis 回复的响应信息
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
 
@@ -586,8 +599,11 @@ public class CommandHandler extends ChannelDuplexHandler implements HasQueuedCom
             }
 
             buffer.touch("CommandHandler.read(…)");
+
+            // SQ: 这里读到的可能是部分回复内容，不是完整内容，先暂存到 buffer 中，下面根据 buffer 中的内容判断是否回复已完整
             buffer.writeBytes(input);
 
+            // SQ: 解析读取到的内容，通过 RedisStateMachine.decode() 解析消息
             decode(ctx, buffer);
         } finally {
             input.release();
@@ -620,6 +636,7 @@ public class CommandHandler extends ChannelDuplexHandler implements HasQueuedCom
 
             try {
                 if (!decode(ctx, buffer, command)) {
+                    // SQ: 未完成解析，可能是半包消息，直接 return，继续等待剩余消息
                     discardReadBytesIfNecessary(buffer);
                     return;
                 }
@@ -634,9 +651,11 @@ public class CommandHandler extends ChannelDuplexHandler implements HasQueuedCom
             } else {
 
                 if (canComplete(command)) {
+                    // SQ: 弹栈
                     stack.poll();
 
                     try {
+                        // SQ: 解析完成，标记 RedisCommand 为 complete
                         complete(command);
                     } catch (Exception e) {
                         logger.warn("{} Unexpected exception during request: {}", logPrefix, e.toString(), e);
@@ -738,6 +757,7 @@ public class CommandHandler extends ChannelDuplexHandler implements HasQueuedCom
         return rsm.decode(buffer, output);
     }
 
+    // SQ: 解析读到的内容
     protected boolean decode(ByteBuf buffer, RedisCommand<?, ?, ?> command, CommandOutput<?, ?, ?> output) {
         return rsm.decode(buffer, command, output);
     }

@@ -15,18 +15,24 @@
  */
 package io.lettuce.core.protocol;
 
-import static io.lettuce.core.protocol.CommandHandler.SUPPRESS_IO_EXCEPTION_MESSAGES;
-
 import java.io.IOException;
 import java.nio.channels.ClosedChannelException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Queue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
-import io.lettuce.core.*;
+import io.lettuce.core.ClientOptions;
+import io.lettuce.core.ConnectionEvents;
+import io.lettuce.core.RedisChannelWriter;
+import io.lettuce.core.RedisConnectionException;
+import io.lettuce.core.RedisException;
 import io.lettuce.core.internal.Futures;
 import io.lettuce.core.internal.LettuceAssert;
 import io.lettuce.core.internal.LettuceFactories;
@@ -41,6 +47,8 @@ import io.netty.util.concurrent.GenericFutureListener;
 import io.netty.util.internal.logging.InternalLogLevel;
 import io.netty.util.internal.logging.InternalLogger;
 import io.netty.util.internal.logging.InternalLoggerFactory;
+
+import static io.lettuce.core.protocol.CommandHandler.SUPPRESS_IO_EXCEPTION_MESSAGES;
 
 /**
  * Default {@link Endpoint} implementation.
@@ -157,14 +165,18 @@ public class DefaultEndpoint implements RedisChannelWriter, Endpoint {
             }
 
             if (autoFlushCommands) {
+                // SQ: 开启 autoFlush，直接通过 Netty 发送
 
                 if (isConnected()) {
+                    // SQ: 连接有效 发送命令（写到 Netty 的 Channel 中）
                     writeToChannelAndFlush(command);
                 } else {
+                    // SQ: 连接无效 发送到 buffer 队列
                     writeToDisconnectedBuffer(command);
                 }
 
             } else {
+                // SQ: 未开启 autoFlush，先写到 commandBuffer 内存队列中
                 writeToBuffer(command);
             }
         } finally {
@@ -383,12 +395,14 @@ public class DefaultEndpoint implements RedisChannelWriter, Endpoint {
         return channel.write(command);
     }
 
+    // SQ: 执行 write RedisCommand，其实就是调用 Netty Channel 的 API
     private ChannelFuture channelWriteAndFlush(RedisCommand<?, ?, ?> command) {
 
         if (debugEnabled) {
             logger.debug("{} write() writeAndFlush command {}", logPrefix(), command);
         }
 
+        // SQ: 写到 Netty 的 Channel 中
         return channel.writeAndFlush(command);
     }
 
