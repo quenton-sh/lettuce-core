@@ -129,11 +129,15 @@ class PooledClusterConnectionProvider<K, V> implements ClusterConnectionProvider
     private CompletableFuture<StatefulRedisConnection<K, V>> getWriteConnection(int slot) {
 
         CompletableFuture<StatefulRedisConnection<K, V>> writer;// avoid races when reconfiguring partitions.
+        // SQ: 找到 slot 对应的 StatefulRedisConnection 对象，有则直接返回（相当于从缓存拿）
         synchronized (stateLock) {
             writer = writers[slot];
         }
 
         if (writer == null) {
+            // SQ: 缓存中没有，建新连接
+
+            // SQ: 获取 slot 在哪个结点
             RedisClusterNode partition = partitions.getPartitionBySlot(slot);
             if (partition == null) {
                 clusterEventListener.onUncoveredSlot(slot);
@@ -144,14 +148,18 @@ class PooledClusterConnectionProvider<K, V> implements ClusterConnectionProvider
             // Use always host and port for slot-oriented operations. We don't want to get reconnected on a different
             // host because the nodeId can be handled by a different host.
             RedisURI uri = partition.getUri();
+
+            // SQ: 缓存 key 是 读写 + 地址
             ConnectionKey key = new ConnectionKey(Intent.WRITE, uri.getHost(), uri.getPort());
 
+            // SQ: 建连
             ConnectionFuture<StatefulRedisConnection<K, V>> future = getConnectionAsync(key);
 
             return future.thenApply(connection -> {
 
                 synchronized (stateLock) {
                     if (writers[slot] == null) {
+                        // SQ: 新建的连接放到缓存中，待下次复用
                         writers[slot] = CompletableFuture.completedFuture(connection);
                     }
                 }
@@ -386,6 +394,7 @@ class PooledClusterConnectionProvider<K, V> implements ClusterConnectionProvider
         return getConnectionAsync(new ConnectionKey(intent, nodeId)).toCompletableFuture();
     }
 
+    // SQ: 执行具体建连，实际会调用到 DefaultClusterNodeConnectionFactory --> RedisCluenterClient.connectToNodeAsync()
     protected ConnectionFuture<StatefulRedisConnection<K, V>> getConnectionAsync(ConnectionKey key) {
 
         ConnectionFuture<StatefulRedisConnection<K, V>> connectionFuture = connectionProvider.getConnection(key);
@@ -620,6 +629,7 @@ class PooledClusterConnectionProvider<K, V> implements ClusterConnectionProvider
      * @return a factory {@link Function}.
      */
     protected ClusterNodeConnectionFactory<K, V> getConnectionFactory(RedisClusterClient redisClusterClient) {
+        // SQ: ConnectionFactory 的实现类在这里
         return new DefaultClusterNodeConnectionFactory<>(redisClusterClient, redisCodec, clusterWriter);
     }
 
@@ -651,10 +661,12 @@ class PooledClusterConnectionProvider<K, V> implements ClusterConnectionProvider
                 }
             }
 
+            // SQ: 调用代理对象获取连接，代理对象是 DefaultClusterNodeConnectionFactory
             ConnectionFuture<StatefulRedisConnection<K, V>> connection = delegate.apply(key);
 
             LettuceAssert.notNull(connection, "Connection is null. Check ConnectionKey because host and nodeId are null.");
 
+            // SQ: 以下是在获取 connection 后添加钩子，比如：失败后关闭连接等
             if (key.intent == Intent.READ) {
 
                 connection = connection.thenCompose(c -> {
@@ -662,6 +674,7 @@ class PooledClusterConnectionProvider<K, V> implements ClusterConnectionProvider
                     RedisFuture<String> stringRedisFuture = c.async().readOnly();
                     return stringRedisFuture.thenApply(s -> c).whenCompleteAsync((s, throwable) -> {
                         if (throwable != null) {
+                            // SQ: 失败后关闭连接
                             c.close();
                         }
                     });
@@ -699,6 +712,7 @@ class PooledClusterConnectionProvider<K, V> implements ClusterConnectionProvider
 
         @Override
         public ConnectionFuture<StatefulRedisConnection<K, V>> apply(ConnectionKey key) {
+            // SQ: 通过 ConnectionKey 获取连接的方法
 
             if (key.nodeId != null) {
                 // NodeId connections do not provide command recovery due to cluster reconfiguration

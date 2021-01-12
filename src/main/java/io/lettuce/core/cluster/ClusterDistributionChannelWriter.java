@@ -101,12 +101,13 @@ class ClusterDistributionChannelWriter implements RedisChannelWriter {
     }
 
     private <K, V, T> RedisCommand<K, V, T> doWrite(RedisCommand<K, V, T> command) {
-
         if (command instanceof ClusterCommand && !command.isDone()) {
-
+            // SQ: 第一次执行命令不会进入这个分支，
+            //  如果命令返回 MOVED 或 ASK，在 ClusterCommand 的 complete 方法中会做判断，并重新调用这个方法，进到这个分支
             ClusterCommand<K, V, T> clusterCommand = (ClusterCommand<K, V, T>) command;
             if (clusterCommand.isMoved() || clusterCommand.isAsk()) {
 
+                // SQ: 从 MOVED 或 ASK 命令中找到重定向结点，重发消息
                 HostAndPort target;
                 boolean asking;
                 if (clusterCommand.isMoved()) {
@@ -163,6 +164,7 @@ class ClusterDistributionChannelWriter implements RedisChannelWriter {
             }
         }
 
+        // SQ: "client xxx" 命令，使用默认连接发送命令
         writeCommand(commandToSend, defaultWriter);
 
         return commandToSend;
@@ -179,6 +181,7 @@ class ClusterDistributionChannelWriter implements RedisChannelWriter {
             return (ClusterCommand<K, V, T>) command;
         }
 
+        // SQ: 把 RedisCommand 包装为 ClusterCommand，在 complete() 方法中对 MOVED 和 ASK 做处理
         return new ClusterCommand<>(command, this, executionLimit);
     }
 

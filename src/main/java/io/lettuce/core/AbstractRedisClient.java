@@ -292,6 +292,7 @@ public abstract class AbstractRedisClient {
      */
     @SuppressWarnings("unchecked")
     // SQ: Cluster 建连 3 / 4
+    // SQ: Cluster 中到具体单结点建连 2 / 3
     protected <K, V, T extends RedisChannelHandler<K, V>> ConnectionFuture<T> initializeChannelAsync(
             ConnectionBuilder connectionBuilder) {
 
@@ -324,6 +325,7 @@ public abstract class AbstractRedisClient {
     }
 
     // SQ: Cluster 建连 4 / 4，执行真正的 netty 建连操作
+    // SQ: Cluster 中到具体单结点建连 3 / 3
     private void initializeChannelAsync0(ConnectionBuilder connectionBuilder, CompletableFuture<Channel> channelReadyFuture,
             SocketAddress redisAddress) {
 
@@ -331,6 +333,10 @@ public abstract class AbstractRedisClient {
 
         Bootstrap redisBootstrap = connectionBuilder.bootstrap();
 
+        // SQ: 此处的 address 来自 RedisClusterClient 的 connectClusterAsync 方法中构造的 socketAddressSupplier，
+        //  里面提供的是 client 连接数最少的结点的地址
+
+        // SQ: 这里建的连接是 Cluster 的默认连接，即对 client 连接数最少的结点的连接
         RedisChannelInitializer initializer = connectionBuilder.build(redisAddress);
         redisBootstrap.handler(initializer);
 
@@ -357,6 +363,8 @@ public abstract class AbstractRedisClient {
 
                 channelReadyFuture.completeExceptionally(it.cause());
             } else {
+                // SQ: 此处后执行（先执行的代码在下面几行，见注释）：
+                //  Netty 建连完成，通知 channelReadyFuture
                 channelReadyFuture.complete(it.channel());
             }
         });
@@ -379,6 +387,7 @@ public abstract class AbstractRedisClient {
                     logger.debug("Connecting to Redis at {}: Success", redisAddress);
                     RedisChannelHandler<?, ?> connection = connectionBuilder.connection();
                     connection.registerCloseables(closeableResources, connection);
+                    // SQ: Netty channel 初始化成功，此处先执行
                     initFuture.trySuccess();
                     return;
                 }

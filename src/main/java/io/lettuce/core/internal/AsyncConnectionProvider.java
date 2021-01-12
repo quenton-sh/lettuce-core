@@ -44,10 +44,12 @@ import java.util.function.Function;
  * @param <F> type of the {@link CompletionStage} handle of the connection progress.
  * @since 5.1
  */
+// SQ: 负责维护连接缓存
 public class AsyncConnectionProvider<K, T extends AsyncCloseable, F extends CompletionStage<T>> {
 
     private final Function<K, F> connectionFactory;
 
+    // SQ: 连接缓存
     private final Map<K, Sync<K, T, F>> connections = new ConcurrentHashMap<>();
 
     private volatile boolean closed;
@@ -97,6 +99,8 @@ public class AsyncConnectionProvider<K, T extends AsyncCloseable, F extends Comp
 
         sync = connections.computeIfAbsent(key, connectionKey -> {
 
+            // SQ: 本质是通过 ConnectionFactory 获取连接
+            //  connectionFactory 的实现类是 DefaultClusterNodeConnectionFactory，相关代码在 PooledClusterConnectionProvider 中
             Sync<K, T, F> createdSync = new Sync<>(key, connectionFactory.apply(key));
 
             if (closed) {

@@ -482,7 +482,8 @@ public class RedisClusterClient extends AbstractRedisClient {
      * @param <V> Value type.
      * @return A new connection.
      */
-    // SQ: 创建到具体结点的连接
+    // SQ: 创建到具体结点的连接，
+    //  PooledClusterConnectionProvider 创建连接也会最终调用此方法
     <K, V> ConnectionFuture<StatefulRedisConnection<K, V>> connectToNodeAsync(RedisCodec<K, V> codec, String nodeId,
             RedisChannelWriter clusterWriter, Mono<SocketAddress> socketAddressSupplier) {
 
@@ -490,6 +491,7 @@ public class RedisClusterClient extends AbstractRedisClient {
         assertNotEmpty(initialUris);
         LettuceAssert.notNull(socketAddressSupplier, "SocketAddressSupplier must not be null");
 
+        // SQ: 创建 Endpoint，Endpoint 具体负责对命令进行处理
         ClusterNodeEndpoint endpoint = new ClusterNodeEndpoint(clientOptions, getResources(), clusterWriter);
 
         RedisChannelWriter writer = endpoint;
@@ -561,7 +563,9 @@ public class RedisClusterClient extends AbstractRedisClient {
      * @param <V> Value type.
      * @return a new connection.
      */
-    // SQ: 建连 0 / 4，向集群中 client 连接数最少的结点建连
+    // SQ: 建连，
+    //  1. 向集群中 client 连接数最少的结点建连作为默认连接；
+    //  2. 构造 ClusterDistributionChannelWriter 作为底层 writer，在执行 cmd 时再向具体结点建连
     private <K, V> CompletableFuture<StatefulRedisClusterConnection<K, V>> connectClusterAsync(RedisCodec<K, V> codec) {
 
         if (partitions == null) {
@@ -578,19 +582,19 @@ public class RedisClusterClient extends AbstractRedisClient {
         Mono<SocketAddress> socketAddressSupplier = getSocketAddressSupplier(TopologyComparators::sortByClientCount);
 
         // SQ: DefaultEndpoint 是 RedisChannelWriter 的具体实现类，负责发送命令
-        DefaultEndpoint endpoint = new DefaultEndpoint(clientOptions, clientResources);
-        RedisChannelWriter writer = endpoint;
+        DefaultEndpoint defaultEndpoint = new DefaultEndpoint(clientOptions, clientResources);
+        RedisChannelWriter defaultWriter = defaultEndpoint;
 
         // SQ: 当设置了 ClientOptions.TimeoutOptions.timeoutCommands == true 时，
         //  在 DefaultEndpoint 外包一层 CommandExpiryWriter
         if (CommandExpiryWriter.isSupported(clientOptions)) {
-            writer = new CommandExpiryWriter(writer, clientOptions, clientResources);
+            defaultWriter = new CommandExpiryWriter(defaultWriter, clientOptions, clientResources);
         }
 
         // SQ: ClusterDistributionChannelWriter 负责把 RedisCommand 分发给某一具体 StatefulRedisConnection 上的 RedisChannelWriter
         //  内部通过 PooledClusterConnectionProvider 找 StatefulRedisConnection
-        ClusterDistributionChannelWriter clusterWriter = new ClusterDistributionChannelWriter(clientOptions, writer,
-                clusterTopologyRefreshScheduler);
+        ClusterDistributionChannelWriter clusterWriter = new ClusterDistributionChannelWriter(clientOptions,
+            defaultWriter, clusterTopologyRefreshScheduler);
 
         // SQ: PooledClusterConnectionProvider 负责管理（缓存）各 slot 所对应的 StatefulRedisConnection
         //  内部通过 connectToNodeAsyn() 创建连接
@@ -598,22 +602,24 @@ public class RedisClusterClient extends AbstractRedisClient {
                 clusterWriter, codec, clusterTopologyRefreshScheduler);
         clusterWriter.setClusterConnectionProvider(pooledClusterConnectionProvider);
 
-        // SQ: StatefulRedisClusterConnectionImpl 主要是包住 RedisChannelWriter
+        // SQ: StatefulRedisClusterConnectionImpl 关联了 clusterWriter，执行命令时再向具体结点连接
+        // SQ: 这行之后的步骤，其实都在在给 defaultEndpoint 建连，即建默认连接
         StatefulRedisClusterConnectionImpl<K, V> connection = new StatefulRedisClusterConnectionImpl<>(clusterWriter, codec,
                 timeout);
 
         connection.setReadFrom(ReadFrom.MASTER);
         connection.setPartitions(partitions);
 
-        Supplier<CommandHandler> commandHandlerSupplier = () -> new CommandHandler(clientOptions, clientResources, endpoint);
+        Supplier<CommandHandler> commandHandlerSupplier = () -> new CommandHandler(clientOptions, clientResources,
+            defaultEndpoint);
 
         Mono<StatefulRedisClusterConnectionImpl<K, V>> connectionMono = Mono
-                .defer(() -> connect(socketAddressSupplier, codec, endpoint, connection, commandHandlerSupplier));
+                .defer(() -> connect(socketAddressSupplier, codec, defaultEndpoint, connection, commandHandlerSupplier));
 
         // SQ: 添加轮询重试，向 client 连接数最少的结点建连失败，则尝试连接数第二少的结点，总共的尝试次数等于结点数，每个结点都有机会
         for (int i = 1; i < getConnectionAttempts(); i++) {
             connectionMono = connectionMono
-                    .onErrorResume(t -> connect(socketAddressSupplier, codec, endpoint, connection, commandHandlerSupplier));
+                    .onErrorResume(t -> connect(socketAddressSupplier, codec, defaultEndpoint, connection, commandHandlerSupplier));
         }
 
         return connectionMono.flatMap(c -> c.reactive().command().collectList() //
@@ -706,7 +712,8 @@ public class RedisClusterClient extends AbstractRedisClient {
      * Initiates a channel connection considering {@link ClientOptions} initialization options, authentication and client name
      * options.
      */
-    // SQ: 建连 2 / 4
+    // SQ: Cluster 建连 2 / 4
+    // SQ: Cluster 中到具体单结点建连 1 / 3
     private <K, V, T extends RedisChannelHandler<K, V>, S> ConnectionFuture<S> connectStatefulAsync(T connection,
             RedisCodec<K, V> codec, DefaultEndpoint endpoint, RedisURI connectionSettings,
             Mono<SocketAddress> socketAddressSupplier, Supplier<CommandHandler> commandHandlerSupplier) {
@@ -751,6 +758,7 @@ public class RedisClusterClient extends AbstractRedisClient {
         if (LettuceStrings.isNotEmpty(connectionSettings.getClientName())) {
             sync = sync.thenApply(channelHandler -> {
 
+                // SQ: 如果设置了 clientName，则再建连完成后执行 setname 命令
                 if (connection instanceof StatefulRedisClusterConnectionImpl) {
                     ((StatefulRedisClusterConnectionImpl) connection).setClientName(connectionSettings.getClientName());
                 }

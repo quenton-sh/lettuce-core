@@ -49,6 +49,7 @@ class ClusterCommand<K, V, T> extends CommandWrapper<K, V, T> implements RedisCo
     @Override
     public void complete() {
 
+        // SQ: 这里对 MOVED 或 ASK 做处理
         if (isMoved() || isAsk()) {
 
             boolean retryCommand = maxRedirections > redirections;
