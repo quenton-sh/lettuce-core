@@ -105,6 +105,7 @@ class ReconnectionHandler {
                 return;
             }
 
+            // SQ: 重连
             reconnect0(future, remoteAddress);
 
         }, ex -> {
@@ -200,10 +201,12 @@ class ReconnectionHandler {
         });
 
         Runnable timeoutAction = () -> {
+            // SQ: 建连成功计时器会被取消，如果没被取消正常执行了，说明已经超时
             initFuture.tryFailure(new TimeoutException(
                     String.format("Reconnection attempt exceeded timeout of %d %s ", timeout, timeoutUnit)));
         };
 
+        // SQ: 计时器，在 timeout 时间内未收到 Channel 对象则执行 timeoutAction：抛出 TimeoutException
         Timeout timeoutHandle = timer.newTimeout(it -> {
 
             if (connectFuture.isDone() && initFuture.isDone()) {
@@ -211,14 +214,17 @@ class ReconnectionHandler {
             }
 
             if (reconnectWorkers.isShutdown()) {
+                // SQ: 线程池已关闭，在当前线程执行
                 timeoutAction.run();
                 return;
             }
 
+            // SQ: 线程池未关闭，在线程池中执行
             reconnectWorkers.submit(timeoutAction);
 
         }, this.timeout, timeoutUnit);
 
+        // SQ: 收到 Channel 对象（建连成功）后取消计时器
         initFuture.addListener(it -> timeoutHandle.cancel());
     }
 

@@ -15,10 +15,6 @@
  */
 package io.lettuce.core.cluster;
 
-import static io.lettuce.core.protocol.CommandType.AUTH;
-import static io.lettuce.core.protocol.CommandType.READONLY;
-import static io.lettuce.core.protocol.CommandType.READWRITE;
-
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;
 import java.time.Duration;
@@ -28,7 +24,14 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
-import io.lettuce.core.*;
+import io.lettuce.core.AbstractRedisClient;
+import io.lettuce.core.ReadFrom;
+import io.lettuce.core.RedisChannelHandler;
+import io.lettuce.core.RedisChannelWriter;
+import io.lettuce.core.RedisCommandExecutionException;
+import io.lettuce.core.RedisException;
+import io.lettuce.core.RedisFuture;
+import io.lettuce.core.RedisURI;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.cluster.api.StatefulRedisClusterConnection;
 import io.lettuce.core.cluster.api.async.RedisAdvancedClusterAsyncCommands;
@@ -43,8 +46,20 @@ import io.lettuce.core.codec.RedisCodec;
 import io.lettuce.core.codec.StringCodec;
 import io.lettuce.core.internal.LettuceAssert;
 import io.lettuce.core.output.StatusOutput;
-import io.lettuce.core.protocol.*;
+import io.lettuce.core.protocol.AsyncCommand;
+import io.lettuce.core.protocol.Command;
+import io.lettuce.core.protocol.CommandArgs;
+import io.lettuce.core.protocol.CommandArgsAccessor;
+import io.lettuce.core.protocol.CommandKeyword;
+import io.lettuce.core.protocol.CommandType;
+import io.lettuce.core.protocol.CompleteableCommand;
+import io.lettuce.core.protocol.ConnectionWatchdog;
+import io.lettuce.core.protocol.RedisCommand;
 import io.netty.util.internal.logging.InternalLoggerFactory;
+
+import static io.lettuce.core.protocol.CommandType.AUTH;
+import static io.lettuce.core.protocol.CommandType.READONLY;
+import static io.lettuce.core.protocol.CommandType.READWRITE;
 
 /**
  * A thread-safe connection to a Redis Cluster. Multiple threads may share one {@link StatefulRedisClusterConnectionImpl}
@@ -223,6 +238,7 @@ public class StatefulRedisClusterConnectionImpl<K, V> extends RedisChannelHandle
 
     @Override
     public <T> RedisCommand<K, V, T> dispatch(RedisCommand<K, V, T> command) {
+
         return super.dispatch(preProcessCommand(command));
     }
 

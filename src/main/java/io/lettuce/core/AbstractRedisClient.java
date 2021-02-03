@@ -333,10 +333,9 @@ public abstract class AbstractRedisClient {
 
         Bootstrap redisBootstrap = connectionBuilder.bootstrap();
 
-        // SQ: 此处的 address 来自 RedisClusterClient 的 connectClusterAsync 方法中构造的 socketAddressSupplier，
+        // SQ: 对于 Cluster 初始建连：此处的 address 来自 RedisClusterClient 的 connectClusterAsync 方法中构造的 socketAddressSupplier，
         //  里面提供的是 client 连接数最少的结点的地址
-
-        // SQ: 这里建的连接是 Cluster 的默认连接，即对 client 连接数最少的结点的连接
+        // SQ: 对于 Cluster 到具体单结点建连：此处 address 就是具体结点的地址
         RedisChannelInitializer initializer = connectionBuilder.build(redisAddress);
         redisBootstrap.handler(initializer);
 
@@ -359,11 +358,12 @@ public abstract class AbstractRedisClient {
         initFuture.addListener((ChannelFuture it) -> {
 
             if (!initFuture.isSuccess()) {
+                // SQ: 建连失败 step2 - 在 ConnectFuture 的回调中标记 InitFuture 失败
                 connectFuture.channel().close();
 
                 channelReadyFuture.completeExceptionally(it.cause());
             } else {
-                // SQ: 此处后执行（先执行的代码在下面几行，见注释）：
+                // SQ: 建连成功 step2
                 //  Netty 建连完成，通知 channelReadyFuture
                 channelReadyFuture.complete(it.channel());
             }
@@ -376,6 +376,7 @@ public abstract class AbstractRedisClient {
                 logger.debug("Connecting to Redis at {}: {}", redisAddress, future.cause());
                 connectionBuilder.endpoint().initialState();
 
+                // SQ: 建连失败 step1 - 在 ConnectFuture 的回调中标记 InitFuture 失败
                 initFuture.tryFailure(future.cause());
                 return;
             }
@@ -385,13 +386,15 @@ public abstract class AbstractRedisClient {
                 if (throwable == null) {
 
                     logger.debug("Connecting to Redis at {}: Success", redisAddress);
+                    // SQ: 把刚建好的连接注册到 closeableResources 中
                     RedisChannelHandler<?, ?> connection = connectionBuilder.connection();
                     connection.registerCloseables(closeableResources, connection);
-                    // SQ: Netty channel 初始化成功，此处先执行
+                    // SQ: 建连成功 step1
                     initFuture.trySuccess();
                     return;
                 }
 
+                // SQ: 以下均是对初始化失败（并非建连失败）的处理
                 logger.debug("Connecting to Redis at {}, initialization: {}", redisAddress, throwable);
                 connectionBuilder.endpoint().initialState();
                 Throwable failure;

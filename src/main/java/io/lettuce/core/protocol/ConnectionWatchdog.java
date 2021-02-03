@@ -193,7 +193,10 @@ public class ConnectionWatchdog extends ChannelInboundHandlerAdapter {
 
         channel = null;
 
-        if (listenOnChannelInactive && !reconnectionHandler.isReconnectSuspended()) {
+        // SQ: listenOnChannelInactive 只有关闭连接、连接异常等情况才会为 false，一般都是 true
+        if (listenOnChannelInactive &&
+            // SQ: reconnectSusspended 只有设置了 clientOptions.isSuspendReconnectOnProtocolFailure() 且建连失败后才会被设为 true
+            !reconnectionHandler.isReconnectSuspended()) {
             scheduleReconnect();
         } else {
             logger.debug("{} Reconnect scheduling disabled", logPrefix(), ctx);
@@ -243,8 +246,8 @@ public class ConnectionWatchdog extends ChannelInboundHandlerAdapter {
                     return;
                 }
 
+                // SQ: 提交重连异步任务（当前在 EventLoop 线程中，重试任务放在工作线程中）
                 reconnectWorkers.submit(() -> {
-                    // SQ: 提交重连异步任务
                     ConnectionWatchdog.this.run(attempt);
                     return null;
                 });
@@ -302,18 +305,24 @@ public class ConnectionWatchdog extends ChannelInboundHandlerAdapter {
         InternalLogLevel warnLevelToUse = warnLevel;
 
         try {
+            // SQ: 发送重连事件，
+            //  reconnectionListern 是 ClusterTopologyRefreshScheduler，
+            //  后者会判断距离上次 refresh 的间隔，如果超过 adaptiveRefreshTriggersTimeout 阈值做一次 refresh
             reconnectionListener.onReconnectAttempt(new ConnectionEvents.Reconnect(attempt));
             logger.log(infoLevel, "Reconnecting, last destination was {}", remoteAddress);
 
+            // SQ: 真正重连动作由 ReconnectionHandler 完成
             Tuple2<CompletableFuture<Channel>, CompletableFuture<SocketAddress>> tuple = reconnectionHandler.reconnect();
             CompletableFuture<Channel> future = tuple.getT1();
 
             future.whenComplete((c, t) -> {
 
                 if (c != null && t == null) {
+                    // SQ: 重新连接成功，退出
                     return;
                 }
 
+                // SQ: 以下都是针对失败的处理
                 CompletableFuture<SocketAddress> remoteAddressFuture = tuple.getT2();
                 SocketAddress remote = remoteAddress;
                 if (remoteAddressFuture.isDone() && !remoteAddressFuture.isCompletedExceptionally()
@@ -324,6 +333,7 @@ public class ConnectionWatchdog extends ChannelInboundHandlerAdapter {
                 String message = String.format("Cannot reconnect to [%s]: %s", remote,
                         t.getMessage() != null ? t.getMessage() : t.toString());
 
+                // SQ: 记日志 && 发事件
                 if (ReconnectionHandler.isExecutionException(t)) {
                     if (logger.isDebugEnabled()) {
                         logger.debug(message, t);
@@ -337,6 +347,7 @@ public class ConnectionWatchdog extends ChannelInboundHandlerAdapter {
                 eventBus.publish(new ReconnectFailedEvent(LocalAddress.ANY, remote, t, attempt));
 
                 if (!isReconnectSuspended()) {
+                    // SQ: 如果 clientOptions.isSuspendReconnectOnProtocolFailure() == false 则再次重试
                     scheduleReconnect();
                 }
             });

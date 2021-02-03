@@ -835,6 +835,7 @@ public class RedisClusterClient extends AbstractRedisClient {
 
     protected void updatePartitionsInConnections() {
 
+        // SQ: 更新所有已建好的连接（ this.closeableResources ）中的 partitions
         forEachClusterConnection(input -> {
             input.setPartitions(partitions);
         });
@@ -1046,6 +1047,7 @@ public class RedisClusterClient extends AbstractRedisClient {
      * @return {@link Supplier} for {@link SocketAddress connection points}.
      */
     protected Mono<SocketAddress> getSocketAddressSupplier(Function<Partitions, Collection<RedisClusterNode>> sortFunction) {
+        // SQ: 轮询获取地址
 
         LettuceAssert.notNull(sortFunction, "Sort function must not be null");
 

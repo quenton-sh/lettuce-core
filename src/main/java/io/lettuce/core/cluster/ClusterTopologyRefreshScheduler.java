@@ -144,11 +144,15 @@ class ClusterTopologyRefreshScheduler implements Runnable, ClusterEventListener 
     }
 
     @Override
+    // SQ: 监听 ConnectionWatchdog 发来的 reconnect 事件
     public void onReconnectAttempt(int attempt) {
 
         if (isEnabled(ClusterTopologyRefreshOptions.RefreshTrigger.PERSISTENT_RECONNECTS)
                 && attempt >= getClusterTopologyRefreshOptions().getRefreshTriggersReconnectAttempts()) {
             if (indicateTopologyRefreshSignal()) {
+                // SQ: 当前重试次数超过 refreshTriggersReconnectAttempts
+                //  且距离上一次 refresh 的时间超过 adaptiveRefreshTriggersTimeout，
+                //  会提交一个 clusterTopologyRefreshTask 任务
                 emitAdaptiveRefreshScheduledEvent();
             }
         }

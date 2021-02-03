@@ -98,6 +98,7 @@ public class ConnectionBuilder {
         handlers.add(new ConnectionEventTrigger(connectionEvents, connection, clientResources.eventBus()));
 
         if (clientOptions.isAutoReconnect()) {
+            // SQ: 只有设置了 autoReconnect == true 才会注册 ConnectionWatchdog
             handlers.add(createConnectionWatchdog());
         }
 

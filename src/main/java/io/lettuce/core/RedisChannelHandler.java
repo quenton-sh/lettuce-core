@@ -334,6 +334,8 @@ public abstract class RedisChannelHandler<K, V> implements Closeable, Connection
     }
 
     public void flushCommands() {
+        // SQ: ClusterDistributionChannelWriter.flushCommands() -->
+        //  PooledClusterConnectionProvider.flushCommands()
         getChannelWriter().flushCommands();
     }
 

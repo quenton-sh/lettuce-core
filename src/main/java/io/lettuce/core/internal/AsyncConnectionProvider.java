@@ -49,7 +49,7 @@ public class AsyncConnectionProvider<K, T extends AsyncCloseable, F extends Comp
 
     private final Function<K, F> connectionFactory;
 
-    // SQ: 连接缓存
+    // SQ: 连接缓存，缓存的对象是 StatefulRedisConnectionImpl
     private final Map<K, Sync<K, T, F>> connections = new ConcurrentHashMap<>();
 
     private volatile boolean closed;
@@ -162,6 +162,7 @@ public class AsyncConnectionProvider<K, T extends AsyncCloseable, F extends Comp
 
         List<CompletableFuture<Void>> futures = new ArrayList<>();
 
+        // SQ: 关闭缓存的所有连接
         forEach((connectionKey, closeable) -> {
 
             futures.add(closeable.closeAsync());

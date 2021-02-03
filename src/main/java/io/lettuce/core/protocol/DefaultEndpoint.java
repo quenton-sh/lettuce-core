@@ -952,9 +952,12 @@ public class DefaultEndpoint implements RedisChannelWriter, Endpoint {
             // Capture values before recycler clears these.
             RedisCommand<?, ?, ?> sentCommand = this.sentCommand;
             Collection<? extends RedisCommand<?, ?, ?>> sentCommands = this.sentCommands;
+
+            // SQ: 进行重试
             potentiallyRequeueCommands(channel, sentCommand, sentCommands);
 
             if (!(cause instanceof ClosedChannelException)) {
+                // SQ: 记日志
 
                 String message = "Unexpected exception during request: {}";
                 InternalLogLevel logLevel = InternalLogLevel.WARN;
@@ -1000,9 +1003,11 @@ public class DefaultEndpoint implements RedisChannelWriter, Endpoint {
             if (channel != null) {
                 DefaultEndpoint endpoint = this.endpoint;
                 channel.eventLoop().submit(() -> {
+                    // SQ: eventloop 中执行
                     requeueCommands(sentCommand, sentCommands, endpoint);
                 });
             } else {
+                // SQ: channel 为空，可能连接已经被 close，在当前线程（netty回调 FutureListener 的线程）中执行
                 requeueCommands(sentCommand, sentCommands, endpoint);
             }
         }
@@ -1013,12 +1018,14 @@ public class DefaultEndpoint implements RedisChannelWriter, Endpoint {
 
             if (sentCommand != null) {
                 try {
+                    // SQ: 重新发送命令
                     endpoint.write(sentCommand);
                 } catch (Exception e) {
                     sentCommand.completeExceptionally(e);
                 }
             } else {
                 try {
+                    // SQ: 重新发送命令
                     endpoint.write((Collection) sentCommands);
                 } catch (Exception e) {
                     for (RedisCommand<?, ?, ?> command : sentCommands) {

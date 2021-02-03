@@ -509,6 +509,7 @@ class PooledClusterConnectionProvider<K, V> implements ClusterConnectionProvider
             this.connectionFactory.setPartitions(partitions);
         }
 
+        // SQ: 关闭到 partitions 中已经不存在的 nodeId 的连接（比如结点下线，被 refresh 到之后，关闭到被下线结点的连接）
         if (reconfigurePartitions) {
             reconfigurePartitions();
         }
@@ -530,6 +531,7 @@ class PooledClusterConnectionProvider<K, V> implements ClusterConnectionProvider
     /**
      * Close stale connections.
      */
+    // SQ: 关闭 partitions 中没有的 nodeId 的连接
     @Override
     public void closeStaleConnections() {
 
@@ -575,6 +577,8 @@ class PooledClusterConnectionProvider<K, V> implements ClusterConnectionProvider
 
     @Override
     public void flushCommands() {
+        // SQ: StatefulRedisClusterConnection 执行 flushCommands 的效果是，
+        //  此处遍历缓存的面向各结点的 StatefullConnection 分别执行 flushCommands
         connectionProvider.forEach(StatefulConnection::flushCommands);
     }
 
